@@ -409,11 +409,13 @@ array rope(
       }
       return std::vector<array>{reshape(out, shape, s)};
     } else {
-      auto out_s = x.shape();
-      out_s.back() = half_dims;
-      auto x1 = slice(x, {0, 0, 0}, out_s, s);
-      out_s.back() = dims;
-      auto x2 = slice(x, {0, 0, half_dims}, out_s, s);
+      // auto out_s = x.shape();
+      // out_s.back() = half_dims;
+      // auto x1 = slice(x, {0, 0, 0}, out_s, s);
+      // out_s.back() = dims;
+      // auto x2 = slice(x, {0, 0, half_dims}, out_s, s);
+      auto x1 = slice(x, {0, 0, 0}, {x.shape(0), x.shape(1), dims}, {1, 1, 2}, s);
+      auto x2 = slice(x, {0, 0, 1}, {x.shape(0), x.shape(1), dims}, {1, 1, 2}, s);
 
       auto outs = apply_rope(x1, x2, coss, sins);
       if (dims < x.shape(-1)) {

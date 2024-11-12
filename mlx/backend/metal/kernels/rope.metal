@@ -27,8 +27,9 @@ void rope_single_impl(
     index_1 = 2 * pos.x + pos.y * stride;
     index_2 = index_1 + 1;
   } else {
-    index_1 = pos.x + pos.y * stride;
-    index_2 = index_1 + grid.x;
+    // Change to match traditional adjacent pairing:
+    index_1 = 2 * pos.x + pos.y * stride;
+    index_2 = index_1 + 1;
   }
 
   // Read and write the output
