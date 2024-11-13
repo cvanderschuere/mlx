@@ -6,44 +6,48 @@
 #include "mlx/backend/metal/kernels/utils.h"
 template <typename T, bool traditional, bool forward>
 void rope_single_impl(
-    const device T* in,
+    const device T* in,          // Shape: [seq_length, num_heads * head_dim]
     device T* out,
     constant const int& offset,
     const float inv_freq,
     constant const float& scale,
-    constant const size_t& stride,
-    uint2 pos,
-    uint2 grid) {
+    constant const size_t& stride,  // Stride between sequence elements
+    uint2 pos,                   // (x: head_dim position, y: seq position)
+    uint2 grid) {                // grid.x = head_dim/2 (for pair processing)
   float L = scale * static_cast<float>(offset);
 
-  // Compute costheta, sintheta
+  // Compute costheta, sintheta for this sequence position
   float theta = L * inv_freq;
   float costheta = metal::fast::cos(theta);
   float sintheta = metal::fast::sin(theta);
 
-  // Compute the input and output indices
+  // Compute the input and output indices for adjacent pairs
   uint index_1, index_2;
   if (traditional) {
     index_1 = 2 * pos.x + pos.y * stride;
     index_2 = index_1 + 1;
   } else {
-    // Change indexing to split on feature dimension
-    index_1 = pos.x + pos.y * stride;               // First half features
-    index_2 = index_1 + (grid.x * stride);          // Second half features (+D/2)
+    // Update to handle adjacent pairs in head_dim
+    index_1 = pos.x * 2 + pos.y * stride;     // Even elements
+    index_2 = index_1 + 1;                    // Odd elements (adjacent pair)
   }
 
-  // Read and write the output
-  float x1 = static_cast<float>(in[index_1]);
-  float x2 = static_cast<float>(in[index_2]);
-  float rx1;
-  float rx2;
+  // Read adjacent pairs of elements
+  float x1 = static_cast<float>(in[index_1]);  // Element at position x
+  float x2 = static_cast<float>(in[index_2]);  // Element at position x+1
+  
+  float rx1, rx2;
   if (forward) {
-    rx1 = x1 * costheta - x2 * sintheta;
-    rx2 = x1 * sintheta + x2 * costheta;
+    // For each adjacent pair (x1,x2):
+    rx1 = x1 * costheta - x2 * sintheta;  // (a*cos(θ) - b*sin(θ))
+    rx2 = x1 * sintheta + x2 * costheta;  // (a*sin(θ) + b*cos(θ))
   } else {
+    // Inverse rotation
     rx1 = x2 * sintheta + x1 * costheta;
     rx2 = x2 * costheta - x1 * sintheta;
   }
+  
+  // Write rotated pairs back to adjacent positions
   out[index_1] = static_cast<T>(rx1);
   out[index_2] = static_cast<T>(rx2);
 }
