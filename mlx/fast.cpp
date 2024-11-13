@@ -376,63 +376,35 @@ array rope(
     auto sins = sin(theta, s);
 
     auto apply_rope = [forward, s](
-                          const array& x,
-                          const array& coss,
-                          const array& sins) {
-      auto shape = x.shape();
-      int B = shape[0];
-      int H = shape[1];
-      int L = shape[2];
-      int D = shape[3];
+            const array& x,
+            const array& coss,
+            const array& sins
+        ) {
+            // Get even and odd indices to work with adjacent pairs
+            auto even_elements = slice(x, {0, 0, 0}, x.shape(), {1, 1, 2}, s);  // [0,2,4,...]
+            auto odd_elements = slice(x, {0, 0, 1}, x.shape(), {1, 1, 2}, s);   // [1,3,5,...]
+            
+            if (forward) {
+                // First output:  (a*cos(θ) - b*sin(θ))
+                auto out1 = subtract(multiply(even_elements, coss, s), 
+                                  multiply(odd_elements, sins, s), s);
+                // Second output: (a*sin(θ) + b*cos(θ))
+                auto out2 = add(multiply(even_elements, sins, s), 
+                              multiply(odd_elements, coss, s), s);
+                
+                // Interleave the results back together along the last dimension
+                return std::vector{concatenate({out1, out2}, -1, s)};
+            } else {
+                auto out1 = add(multiply(even_elements, coss, s), 
+                              multiply(odd_elements, sins, s), s);
+                auto out2 = subtract(multiply(odd_elements, coss, s), 
+                                  multiply(even_elements, sins, s), s);
+                
+                return std::vector{concatenate({out1, out2}, -1, s)};
+            }
+        };
 
-      // Get the pairs we want to rotate together
-      auto x1 = slice(x, {0, 0, 0, 0}, {B, H, L, D/2}, s);          // First half features
-      auto x2 = slice(x, {0, 0, 0, D/2}, {B, H, L, D}, s);         // Second half features
-
-
-      std::vector<array> outs;
-      if (forward) {
-        outs.push_back(
-            subtract(multiply(x1, coss, s), multiply(x2, sins, s), s));
-        outs.push_back(add(multiply(x1, sins, s), multiply(x2, coss, s), s));
-      } else {
-        outs.push_back(add(multiply(x2, sins, s), multiply(x1, coss, s), s));
-        outs.push_back(
-            subtract(multiply(x2, coss, s), multiply(x1, sins, s), s));
-      }
-      return outs;
-    };
-
-    // if (traditional) {
-    //   auto x1 =
-    //       slice(x, {0, 0, 0}, {x.shape(0), x.shape(1), dims}, {1, 1, 2}, s);
-    //   auto x2 =
-    //       slice(x, {0, 0, 1}, {x.shape(0), x.shape(1), dims}, {1, 1, 2}, s);
-    //   auto outs = apply_rope(x1, x2, coss, sins);
-    //   for (auto& o : outs) {
-    //     o = expand_dims(o, 3, s);
-    //   }
-    //   auto out = concatenate(outs, 3, s);
-    //   if (dims < x.shape(-1)) {
-    //     out = reshape(out, {x.shape(0), x.shape(1), dims});
-    //     out = concatenate({out, slice(x, {0, 0, dims}, x.shape(), s)}, 2, s);
-    //   }
-    //   return std::vector<array>{reshape(out, shape, s)};
-    // } else {
-      // auto out_s = x.shape();
-      // out_s.back() = half_dims;
-      // auto x1 = slice(x, {0, 0, 0}, out_s, s);
-      // out_s.back() = dims;
-      // auto x2 = slice(x, {0, 0, half_dims}, out_s, s);
-      // auto x1 = slice(x, {0, 0, 0}, {x.shape(0), x.shape(1), dims}, {1, 1, 2}, s);
-      // auto x2 = slice(x, {0, 0, 1}, {x.shape(0), x.shape(1), dims}, {1, 1, 2}, s);
-
-      auto outs = apply_rope(x, coss, sins);
-      if (dims < x.shape(-1)) {
-        outs.push_back(slice(x, {0, 0, dims}, x.shape(), s));
-      }
-      return std::vector<array>{reshape(concatenate(outs, 2, s), shape, s)};
-    // }
+    return apply_rope(x, coss, sins);
   };
   auto stream = to_stream(s);
   if (stream.device == Device::gpu) {

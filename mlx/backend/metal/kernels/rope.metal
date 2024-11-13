@@ -82,28 +82,28 @@ template <typename T, bool traditional, bool forward>
 
 template <typename T, bool traditional, bool forward, int N = 4>
 void rope_impl(
-    const device T* in,
+    const device T* in,          // Shape: [batch_size, seq_length, num_heads * head_dim]
     device T* out,
     constant const int& offset,
     const float inv_freq,
     constant const float& scale,
-    constant const size_t strides[3],
-    constant const size_t out_strides[3],
+    constant const size_t strides[3],        // [batch_stride, seq_stride, head_stride]
+    constant const size_t out_strides[3],    // Output strides matching input dimensions
     constant const size_t& n_batch,
-    uint3 pos,
-    uint3 grid) {
+    uint3 pos,                   // (x: head_dim position, y: seq position, z: batch chunk)
+    uint3 grid) {                // grid.x = head_dim/2 (for pair processing)
   float L = scale * static_cast<float>(pos.y + offset);
 
-  // Compute costheta, sintheta
+  // Compute costheta, sintheta for this sequence position
   float theta = L * inv_freq;
   float costheta = metal::fast::cos(theta);
   float sintheta = metal::fast::sin(theta);
 
-  // Compute the input and output indices
+  // Compute the input and output indices for adjacent pairs
   size_t in_index_1, in_index_2;
   size_t out_index_1, out_index_2;
   if (traditional) {
-    // Keep traditional the same
+    // Keep traditional implementation
     out_index_1 = 2 * pos.x * out_strides[2] + pos.y * out_strides[1] +
         N * pos.z * out_strides[0];
     out_index_2 = out_index_1 + 1;
@@ -111,29 +111,40 @@ void rope_impl(
         2 * pos.x * strides[2] + pos.y * strides[1] + N * pos.z * strides[0];
     in_index_2 = in_index_1 + strides[2];
   } else {
-    // Update indexing to split on feature dimension
-    out_index_1 = pos.x * out_strides[2] + pos.y * out_strides[1] +
-        N * pos.z * out_strides[0];
-    out_index_2 = out_index_1 + (grid.x * out_strides[2]);  // Add D/2 offset
-    in_index_1 = pos.x * strides[2] + pos.y * strides[1] + 
-        N * pos.z * strides[0];
-    in_index_2 = in_index_1 + (grid.x * strides[2]);  // Add D/2 offset
+    // Update to handle adjacent pairs in head_dim
+    // For head_dim value at position x, we want to pair it with x+1
+    out_index_1 = pos.x * 2 * out_strides[2] + pos.y * out_strides[1] +
+        N * pos.z * out_strides[0];  // Position for even elements
+    out_index_2 = out_index_1 + out_strides[2];  // Next element (odd)
+    
+    // Input indices similarly handle adjacent pairs
+    in_index_1 = pos.x * 2 * strides[2] + pos.y * strides[1] + 
+        N * pos.z * strides[0];  // Even elements
+    in_index_2 = in_index_1 + strides[2];  // Odd elements (x+1)
   }
+
+  // Process N items in the batch dimension at once
   for (int i = 0; i < N && pos.z * N + i < n_batch; ++i) {
-    // Read and write the output
-    float x1 = static_cast<float>(in[in_index_1]);
-    float x2 = static_cast<float>(in[in_index_2]);
-    float rx1;
-    float rx2;
+    // Read adjacent pairs of elements
+    float x1 = static_cast<float>(in[in_index_1]);  // Element at position x
+    float x2 = static_cast<float>(in[in_index_2]);  // Element at position x+1
+    
+    float rx1, rx2;
     if (forward) {
-      rx1 = x1 * costheta - x2 * sintheta;
-      rx2 = x1 * sintheta + x2 * costheta;
+      // For each adjacent pair (x1,x2):
+      rx1 = x1 * costheta - x2 * sintheta;  // (a*cos(θ) - b*sin(θ))
+      rx2 = x1 * sintheta + x2 * costheta;  // (a*sin(θ) + b*cos(θ))
     } else {
+      // Inverse rotation
       rx1 = x2 * sintheta + x1 * costheta;
       rx2 = x2 * costheta - x1 * sintheta;
     }
+    
+    // Write rotated pairs back to adjacent positions
     out[out_index_1] = static_cast<T>(rx1);
     out[out_index_2] = static_cast<T>(rx2);
+    
+    // Move to next batch item
     in_index_1 += strides[0];
     in_index_2 += strides[0];
     out_index_1 += out_strides[0];
