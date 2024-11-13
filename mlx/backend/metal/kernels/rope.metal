@@ -27,9 +27,9 @@ void rope_single_impl(
     index_1 = 2 * pos.x + pos.y * stride;
     index_2 = index_1 + 1;
   } else {
-    // Change to match traditional adjacent pairing:
-    index_1 = 2 * pos.x + pos.y * stride;
-    index_2 = index_1 + 1;
+    // Change indexing to split on feature dimension
+    index_1 = pos.x + pos.y * stride;               // First half features
+    index_2 = index_1 + (grid.x * stride);          // Second half features (+D/2)
   }
 
   // Read and write the output
@@ -103,6 +103,7 @@ void rope_impl(
   size_t in_index_1, in_index_2;
   size_t out_index_1, out_index_2;
   if (traditional) {
+    // Keep traditional the same
     out_index_1 = 2 * pos.x * out_strides[2] + pos.y * out_strides[1] +
         N * pos.z * out_strides[0];
     out_index_2 = out_index_1 + 1;
@@ -110,12 +111,13 @@ void rope_impl(
         2 * pos.x * strides[2] + pos.y * strides[1] + N * pos.z * strides[0];
     in_index_2 = in_index_1 + strides[2];
   } else {
+    // Update indexing to split on feature dimension
     out_index_1 = pos.x * out_strides[2] + pos.y * out_strides[1] +
         N * pos.z * out_strides[0];
-    out_index_2 = out_index_1 + grid.x * out_strides[2];
-    in_index_1 =
-        pos.x * strides[2] + pos.y * strides[1] + N * pos.z * strides[0];
-    in_index_2 = in_index_1 + grid.x * strides[2];
+    out_index_2 = out_index_1 + (grid.x * out_strides[2]);  // Add D/2 offset
+    in_index_1 = pos.x * strides[2] + pos.y * strides[1] + 
+        N * pos.z * strides[0];
+    in_index_2 = in_index_1 + (grid.x * strides[2]);  // Add D/2 offset
   }
   for (int i = 0; i < N && pos.z * N + i < n_batch; ++i) {
     // Read and write the output
