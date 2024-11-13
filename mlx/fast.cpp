@@ -610,8 +610,7 @@ array scaled_dot_product_attention(
       query_head_dim == 64 || query_head_dim == 128;
   const size_t query_sequence_length = q.shape(2);
   const bool supports_full_self_attention = query_sequence_length >= 16 &&
-      !mask.has_value() && supported_head_dim_self_attn &&
-      n_q_heads == n_kv_heads && final_type != bfloat16 &&
+      !mask.has_value() && supported_head_dim_self_attn && final_type != bfloat16 &&
       stream.device == Device::gpu;
 
   // fast decoding gpu shader
